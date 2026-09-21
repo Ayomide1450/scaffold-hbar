@@ -23,7 +23,13 @@ interface SourcifyJob {
   error?: { message: string };
 }
 
-async function submitWithMetadata(chainId: number, address: string, metadata: unknown, sources: Record<string, string>, creationTransactionHash?: string) {
+async function submitWithMetadata(
+  chainId: number,
+  address: string,
+  metadata: unknown,
+  sources: Record<string, string>,
+  creationTransactionHash?: string,
+) {
   const body = JSON.stringify({ metadata, sources, creationTransactionHash });
   const res = await fetch(`${SOURCIFY_SERVER}/v2/verify/metadata/${chainId}/${address}`, {
     method: "POST",
@@ -95,7 +101,13 @@ async function main() {
     }
 
     console.log(`\nVerifying ${name} at ${deployment.address} (chain ${chainId})...`);
-    const verificationId = await submitWithMetadata(chainId, deployment.address, metadata, sources, deployment.receipt?.transactionHash);
+    const verificationId = await submitWithMetadata(
+      chainId,
+      deployment.address,
+      metadata,
+      sources,
+      deployment.receipt?.transactionHash,
+    );
     const job = await pollJob(verificationId);
 
     if (job.contract?.match) {

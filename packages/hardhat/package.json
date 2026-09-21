@@ -17,7 +17,7 @@
     "lint": "eslint",
     "lint-staged": "eslint",
     "runner": "hardhat run scripts/runner.ts",
-    "test": "HEDERA_FORKING=true REPORT_GAS=true hardhat test",
+    "test": "hardhat test",
     "verify": "hardhat verify",
     "verify:testnet": "hardhat run scripts/verifyDeployed.ts --network hederaTestnet",
     "verify:mainnet": "hardhat run scripts/verifyDeployed.ts --network hederaMainnet"

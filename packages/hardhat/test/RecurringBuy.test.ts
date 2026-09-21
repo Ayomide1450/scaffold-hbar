@@ -1,14 +1,15 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
+import type { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 
-import type { MockERC20, MockHederaTokenService, MockSaucerSwapRouter, RecurringBuy } from "../typechain-types";
+import type { MockERC20, MockSaucerSwapRouter, RecurringBuy } from "../typechain-types";
 
 describe("RecurringBuy", () => {
   let mockRouter: MockSaucerSwapRouter;
   let sauce: MockERC20;
   let recurringBuy: RecurringBuy;
-  let owner: string;
-  let stranger: string;
+  let owner: HardhatEthersSigner;
+  let stranger: HardhatEthersSigner;
 
   const WHBAR = "0x0000000000000000000000000000000000003ad2";
   const HTS_PRECOMPILE = "0x0000000000000000000000000000000000000167";
@@ -21,7 +22,8 @@ describe("RecurringBuy", () => {
     // HederaTokenService) so createStream's associateToken call works hermetically.
     const MockHedera = await ethers.getContractFactory("MockHederaTokenService");
     const mockHedera = await MockHedera.deploy();
-    const { deployedBytecode } = await import("../artifacts/contracts/mocks/MockHederaTokenService.sol/MockHederaTokenService.json");
+    const { deployedBytecode } =
+      await import("../artifacts/contracts/mocks/MockHederaTokenService.sol/MockHederaTokenService.json");
     await ethers.provider.send("hardhat_setCode", [HTS_PRECOMPILE, deployedBytecode]);
     void mockHedera;
   });
@@ -48,7 +50,7 @@ describe("RecurringBuy", () => {
 
     expect(await recurringBuy.streamCount()).to.equal(1n);
     const stream = await recurringBuy.getStream(1n);
-    expect(stream.owner).to.equal(owner);
+    expect(stream.owner).to.equal(owner.address);
     expect(stream.tokenOut).to.equal(await sauce.getAddress());
     expect(stream.fundedTinybar).to.equal(ONE_HBAR * 3n);
     expect(stream.nextExecutionAt).to.be.greaterThan(0n);
@@ -68,7 +70,9 @@ describe("RecurringBuy", () => {
   });
 
   it("rejects execution before the cadence elapses", async () => {
-    await (await recurringBuy.createStream(await sauce.getAddress(), ONE_HBAR, 3600n, 100n, 1n, { value: ONE_HBAR })).wait();
+    await (
+      await recurringBuy.createStream(await sauce.getAddress(), ONE_HBAR, 3600n, 100n, 1n, { value: ONE_HBAR })
+    ).wait();
     await expect(recurringBuy.executeById(1n)).to.be.reverted;
   });
 
@@ -92,7 +96,9 @@ describe("RecurringBuy", () => {
   });
 
   it("pauses and blocks execution", async () => {
-    await (await recurringBuy.createStream(await sauce.getAddress(), ONE_HBAR, 60n, 100n, 1n, { value: ONE_HBAR })).wait();
+    await (
+      await recurringBuy.createStream(await sauce.getAddress(), ONE_HBAR, 60n, 100n, 1n, { value: ONE_HBAR })
+    ).wait();
     await (await recurringBuy.pauseStream(1n)).wait();
 
     await ethers.provider.send("evm_increaseTime", [60]);
@@ -102,19 +108,19 @@ describe("RecurringBuy", () => {
   });
 
   it("only the owner can withdraw accrued tokens", async () => {
-    await (await recurringBuy.createStream(await sauce.getAddress(), ONE_HBAR, 60n, 100n, 1n, { value: ONE_HBAR })).wait();
+    await (
+      await recurringBuy.createStream(await sauce.getAddress(), ONE_HBAR, 60n, 100n, 1n, { value: ONE_HBAR })
+    ).wait();
     await ethers.provider.send("evm_increaseTime", [60]);
     await ethers.provider.send("evm_mine", []);
     await (await recurringBuy.executeById(1n)).wait();
 
-    await expect(
-      recurringBuy.connect(stranger).withdraw(1n, await sauce.getAddress())
-    ).to.be.reverted;
+    await expect(recurringBuy.connect(stranger).withdraw(1n, await sauce.getAddress())).to.be.reverted;
 
     // The mock router mints 95% of the input to this contract; withdraw sends it to the owner.
     await expect(recurringBuy.withdraw(1n, await sauce.getAddress()))
       .to.emit(recurringBuy, "TokensWithdrawn")
-      .withArgs(1n, owner, await sauce.getAddress(), 95000000n);
+      .withArgs(1n, owner.address, await sauce.getAddress(), 95000000n);
     expect(await recurringBuy.accruedOf(1n, await sauce.getAddress())).to.equal(0n);
   });
 

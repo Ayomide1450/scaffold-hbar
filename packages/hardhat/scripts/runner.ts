@@ -31,8 +31,7 @@ async function main() {
 
   let deployment: { address: string; hederaContractId?: string };
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    deployment = require(deploymentPath) as { address: string; hederaContractId?: string };
+    deployment = (await import(deploymentPath)) as { address: string; hederaContractId?: string };
   } catch {
     throw new Error(
       `No RecurringBuy deployment on "${networkName}". Run \`yarn hardhat:deploy --network ${networkName}\` first.`,
@@ -44,7 +43,9 @@ async function main() {
 
   console.log(`Keeper ready · network=${networkName} contract=${deployment.address}`);
   if (deployment.hederaContractId) {
-    console.log(`HashScan: https://hashscan.io/${networkName === "hederaTestnet" ? "testnet" : "mainnet"}/contract/${deployment.hederaContractId}`);
+    console.log(
+      `HashScan: https://hashscan.io/${networkName === "hederaTestnet" ? "testnet" : "mainnet"}/contract/${deployment.hederaContractId}`,
+    );
   }
   console.log(`Signer: ${await signer.getAddress()}\n`);
 
@@ -69,11 +70,16 @@ async function main() {
 
       const annotated = `${stream.owner.slice(0, 6)}…${stream.owner.slice(-4)} → ${stream.tokenOut}`;
       console.log(`[sweep #${iteration}] executing stream #${streamId} · ${annotated}`);
-      console.log(`  buyAmountTinybar=${stream.buyAmountTinybar} cadence=${stream.cadenceSeconds}s slippage=${stream.maxSlippageBps}bps`);
+      console.log(
+        `  buyAmountTinybar=${stream.buyAmountTinybar} cadence=${stream.cadenceSeconds}s slippage=${stream.maxSlippageBps}bps`,
+      );
 
       try {
         const tx = await contract.executeById(streamId);
         const receipt = await tx.wait();
+        if (!receipt) {
+          throw new Error("executeById produced no receipt");
+        }
         const amountOut = await contract.accruedOf(streamId, stream.tokenOut);
         console.log(`  ✅ executed · tx=${receipt.hash} gasUsed=${receipt.gasUsed} accrued=${amountOut}`);
         executed.push(streamId);
@@ -96,7 +102,9 @@ async function main() {
     await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_SECONDS * 1000));
   }
 
-  console.log(`\nRan ${iteration} sweeps; executed stream(s): ${executed.length > 0 ? executed.join(", ") : "none (nothing due)"}`);
+  console.log(
+    `\nRan ${iteration} sweeps; executed stream(s): ${executed.length > 0 ? executed.join(", ") : "none (nothing due)"}`,
+  );
 }
 
 main().catch(error => {

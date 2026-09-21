@@ -1,17 +1,13 @@
 "use client";
 
+import { useState } from "react";
 import Image from "next/image";
-import { ArrowPathIcon, PlusIcon, PauseIcon, PlayIcon, CurrencyDollarIcon } from "@heroicons/react/24/outline";
 import { HederaPortalFaucet } from "@scaffold-hbar-ui/components";
 import type { NextPage } from "next";
-import { useState } from "react";
 import { useAccount } from "wagmi";
+import { ArrowPathIcon, CurrencyDollarIcon, PauseIcon, PlayIcon, PlusIcon } from "@heroicons/react/24/outline";
 import { HederaAddress } from "~~/components/scaffold-hbar";
-import {
-  useTargetNetwork,
-  useScaffoldReadContract,
-  useScaffoldWriteContract,
-} from "~~/hooks/scaffold-hbar";
+import { useScaffoldReadContract, useScaffoldWriteContract, useTargetNetwork } from "~~/hooks/scaffold-hbar";
 import { notification } from "~~/utils/scaffold-hbar";
 
 /** SAUCE token on Hedera testnet (0.0.1183558) — long-zero EVM address. */
@@ -56,12 +52,18 @@ const Home: NextPage = () => {
       <div className="flex items-center flex-col grow">
         <div className="hedera-gradient dark:bg-none dark:bg-hedera-charcoal w-full py-16 px-5">
           <div className="flex flex-col items-center max-w-2xl mx-auto text-center">
-            <Image src="/Hedera-Icon-White.svg" alt="Hedera icon" width={64} height={64} className="mb-4 hidden dark:block" />
+            <Image
+              src="/Hedera-Icon-White.svg"
+              alt="Hedera icon"
+              width={64}
+              height={64}
+              className="mb-4 hidden dark:block"
+            />
             <Image src="/Hedera-Icon-Dark.svg" alt="Hedera icon" width={64} height={64} className="mb-4 dark:hidden" />
             <h1 className="text-3xl md:text-4xl font-bold text-white dark:text-white">SaucerSwap Recurring Buy</h1>
             <p className="mt-3 text-white/80 dark:text-white/60 max-w-xl">
-              Set up automatic dollar-cost averaging into any HTS token on the SaucerSwap V1 DEX — pre-fund a
-              stream in HBAR, pick a cadence, and let anyone keep it on schedule.
+              Set up automatic dollar-cost averaging into any HTS token on the SaucerSwap V1 DEX — pre-fund a stream in
+              HBAR, pick a cadence, and let anyone keep it on schedule.
             </p>
           </div>
         </div>
@@ -75,7 +77,9 @@ const Home: NextPage = () => {
               </div>
             ) : isConnected ? (
               <div className="flex flex-col items-center gap-2">
-                <p className="font-semibold text-sm text-base-content/60 uppercase tracking-wider m-0">Connected Address</p>
+                <p className="font-semibold text-sm text-base-content/60 uppercase tracking-wider m-0">
+                  Connected Address
+                </p>
                 <HederaAddress address={connectedAddress} chain={targetNetwork} />
               </div>
             ) : (
@@ -115,7 +119,13 @@ function CreateStreamForm({ onCreated, disabled }: { onCreated: () => void; disa
       const value = hbarToWei(fundHbar);
       await writeContractAsync({
         functionName: "createStream",
-        args: [tokenOut as `0x${string}`, hbarToTinybar(buyHbar), BigInt(Number(cadenceMin) * 60), BigInt(slippageBps), BigInt(maxCadences)],
+        args: [
+          tokenOut as `0x${string}`,
+          hbarToTinybar(buyHbar),
+          BigInt(Number(cadenceMin) * 60),
+          BigInt(slippageBps),
+          BigInt(maxCadences),
+        ],
         value,
       });
       notification.success("Stream created. Fund the next cadence to start swapping.");
@@ -143,29 +153,69 @@ function CreateStreamForm({ onCreated, disabled }: { onCreated: () => void; disa
         <div className="md:col-span-2">
           <span className={label}>Token to buy (HTS address)</span>
           <input className={field} value={tokenOut} onChange={e => setTokenOut(e.target.value)} required />
-          <span className="text-xs text-base-content/50 mt-1 block">Testnet SAUCE: 0.0.1183558 (needs a WHBAR V1 pair)</span>
+          <span className="text-xs text-base-content/50 mt-1 block">
+            Testnet SAUCE: 0.0.1183558 (needs a WHBAR V1 pair)
+          </span>
         </div>
 
         <div>
           <span className={label}>HBAR per cadence</span>
-          <input className={field} type="number" min="0.00000001" step="any" value={buyHbar} onChange={e => setBuyHbar(e.target.value)} required />
+          <input
+            className={field}
+            type="number"
+            min="0.00000001"
+            step="any"
+            value={buyHbar}
+            onChange={e => setBuyHbar(e.target.value)}
+            required
+          />
         </div>
         <div>
           <span className={label}>Cadence (minutes)</span>
-          <input className={field} type="number" min="1" value={cadenceMin} onChange={e => setCadenceMin(e.target.value)} required />
+          <input
+            className={field}
+            type="number"
+            min="1"
+            value={cadenceMin}
+            onChange={e => setCadenceMin(e.target.value)}
+            required
+          />
         </div>
         <div>
           <span className={label}>Max slippage (bps)</span>
-          <input className={field} type="number" min="1" max="500" value={slippageBps} onChange={e => setSlippageBps(e.target.value)} required />
+          <input
+            className={field}
+            type="number"
+            min="1"
+            max="500"
+            value={slippageBps}
+            onChange={e => setSlippageBps(e.target.value)}
+            required
+          />
           <span className="text-xs text-base-content/50 mt-1 block">100 bps = 1%</span>
         </div>
         <div>
           <span className={label}>Max cadences (0 = until funds run out)</span>
-          <input className={field} type="number" min="0" value={maxCadences} onChange={e => setMaxCadences(e.target.value)} required />
+          <input
+            className={field}
+            type="number"
+            min="0"
+            value={maxCadences}
+            onChange={e => setMaxCadences(e.target.value)}
+            required
+          />
         </div>
         <div className="md:col-span-2">
           <span className={label}>Initial funding (HBAR escrowed in contract)</span>
-          <input className={field} type="number" min="0.00000001" step="any" value={fundHbar} onChange={e => setFundHbar(e.target.value)} required />
+          <input
+            className={field}
+            type="number"
+            min="0.00000001"
+            step="any"
+            value={fundHbar}
+            onChange={e => setFundHbar(e.target.value)}
+            required
+          />
         </div>
 
         <div className="md:col-span-2 flex justify-end">
@@ -199,6 +249,7 @@ function StreamList({ streamIds }: { streamIds: bigint[] }) {
 
 function StreamCard({ streamId }: { streamId: bigint }) {
   const { address: connectedAddress } = useAccount();
+  const { targetNetwork } = useTargetNetwork();
   const { data: s } = useScaffoldReadContract({
     contractName: "RecurringBuy",
     functionName: "getStream",
@@ -208,9 +259,11 @@ function StreamCard({ streamId }: { streamId: bigint }) {
   const [busy, setBusy] = useState<string | null>(null);
 
   const stream = s as unknown as Record<string, unknown> | undefined;
-  const owner = stream?.owner as string | undefined;
+  const owner = stream?.owner as `0x${string}` | undefined;
   const isOwner = !!connectedAddress && owner?.toLowerCase() === connectedAddress.toLowerCase();
-  const nextExecutionIn = stream ? (stream.nextExecutionAt as bigint) - BigInt(Math.floor(Date.now() / 1000)) : undefined;
+  const nextExecutionIn = stream
+    ? (stream.nextExecutionAt as bigint) - BigInt(Math.floor(Date.now() / 1000))
+    : undefined;
 
   async function act(functionName: string, args: readonly unknown[] = []) {
     if (!functionName) return;
@@ -230,30 +283,52 @@ function StreamCard({ streamId }: { streamId: bigint }) {
       <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
         <div>
           <h3 className="font-bold m-0">Stream #{streamId.toString()}</h3>
-          <p className="text-xs text-base-content/60 m-0 mt-0.5">Owner: {owner ? <HederaAddress address={owner} /> : "…"}</p>
+          <p className="text-xs text-base-content/60 m-0 mt-0.5">
+            Owner: {owner ? <HederaAddress address={owner} chain={targetNetwork} /> : "…"}
+          </p>
         </div>
         <div className="text-right">
           <p className="m-0 text-lg font-mono font-semibold">{formatHbarForDisplay(stream)} HBAR / cadence</p>
           <p className="text-xs text-base-content/60 m-0">
-            {stream?.isPaused ? "Paused" : nextExecutionIn !== undefined && nextExecutionIn > 0n ? `next swap in ${formatCadence(nextExecutionIn)}` : "due now"}
+            {stream?.isPaused
+              ? "Paused"
+              : nextExecutionIn !== undefined && nextExecutionIn > 0n
+                ? `next swap in ${formatCadence(nextExecutionIn)}`
+                : "due now"}
           </p>
         </div>
       </div>
 
       <div className="flex flex-wrap gap-2">
-        <button className="btn btn-sm btn-primary" disabled={!stream || !!busy} onClick={() => act("executeById", [streamId])}>
+        <button
+          className="btn btn-sm btn-primary"
+          disabled={!stream || !!busy}
+          onClick={() => act("executeById", [streamId])}
+        >
           <ArrowPathIcon className="h-4 w-4" /> {busy === "executeById" ? "Executing…" : "Execute (keeper)"}
         </button>
         {isOwner && (
           <>
-            <button className="btn btn-sm" disabled={!!busy} onClick={() => act(stream?.isPaused ? "resumeStream" : "pauseStream", [streamId])}>
+            <button
+              className="btn btn-sm"
+              disabled={!!busy}
+              onClick={() => act(stream?.isPaused ? "resumeStream" : "pauseStream", [streamId])}
+            >
               {stream?.isPaused ? <PlayIcon className="h-4 w-4" /> : <PauseIcon className="h-4 w-4" />}
               {stream?.isPaused ? "Resume" : "Pause"}
             </button>
-            <button className="btn btn-sm" disabled={!stream || !!busy} onClick={() => act("withdraw", [streamId, stream?.tokenOut])}>
+            <button
+              className="btn btn-sm"
+              disabled={!stream || !!busy}
+              onClick={() => act("withdraw", [streamId, stream?.tokenOut])}
+            >
               <CurrencyDollarIcon className="h-4 w-4" /> Withdraw tokens
             </button>
-            <button className="btn btn-sm btn-outline btn-error" disabled={!!busy} onClick={() => act("closeStream", [streamId])}>
+            <button
+              className="btn btn-sm btn-outline btn-error"
+              disabled={!!busy}
+              onClick={() => act("closeStream", [streamId])}
+            >
               Close & refund HBAR
             </button>
           </>
@@ -311,7 +386,9 @@ function QuickStart({ isConnected }: { isConnected: boolean }) {
             <div>
               <p className="m-0 font-medium">{step.title}</p>
               <p className="m-0 mt-1 text-sm text-base-content/70">{step.body}</p>
-              {step.code && <code className="text-xs bg-base-200 px-2 py-1 rounded inline-block mt-2">{step.code}</code>}
+              {step.code && (
+                <code className="text-xs bg-base-200 px-2 py-1 rounded inline-block mt-2">{step.code}</code>
+              )}
             </div>
           </div>
         ))}
