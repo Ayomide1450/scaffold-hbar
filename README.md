@@ -1,51 +1,52 @@
-# x402 Pay-Per-Use Template (Hedera)
+# SaucerSwap Recurring Buy Template (Hedera)
 
-Pay-per-download file marketplace on Hedera using [x402](https://x402.org/): private **MinIO** storage, self-hosted **x402 facilitator**, and on-chain **FileRegistry** metadata.
+Recurring buy / DCA scheduler on Hedera: **`RecurringBuy`** pre-funds a swap stream in HBAR, and any **keeper** can call `executeById` once a cadence elapses to swap a fixed HBAR amount into an HTS token through the **SaucerSwap V1 DEX**. A Next.js dashboard creates, monitors, and manages streams.
 
-CLI key: `x402-pay-per-use` (branch `templates/x402-pay-per-use`).
+This is a **load-bearing DEX integration** — without SaucerSwap there is no price, no swap, no template. It composes three Hedera services:
+
+| Hedera service | Where it is used |
+| --- | --- |
+| **HSCS** (Hedera Smart Contract Service) | `RecurringBuy` stores streams, es absorbs escrow, schedules cadences |
+| **HTS** (Hedera Token Service) | Contract **self-associates** with the output token via the HTS precompile (`0x167`); purchased HTS tokens are accrued and withdrawn |
+| **SaucerSwap V1 DEX** | `getAmountsOut` pricing + `swapExactETHForTokens` execution against the live AMM |
+
+CLI key: `saucerswap-recurring-buy` (branch `templates/saucerswap-recurring-buy`).
 
 ```bash
-npx create-scaffold-hbar@latest --template x402-pay-per-use
+npx create-scaffold-hbar@latest --template saucerswap-recurring-buy
 ```
 
 General Scaffold-HBAR setup: [Scaffold HBAR on Hedera](https://docs.hedera.com/solutions/tools/scaffold-hbar/index). Step-by-step verification: [`RUNBOOK.md`](RUNBOOK.md).
 
 ## Disclaimer
 
-This template—including **contracts, frontend, facilitator, and tooling**—is **experimental** and **not audited**. Use testnets and small amounts only.
+This template—including **contracts, frontend, and tooling**—is **experimental** and **not audited**. Use testnets and small amounts only.
 
-Sellers upload files to private **MinIO** storage and register them on-chain with `FileRegistry`. Buyers pay in **HBAR** via **HashPack**; a self-hosted **x402 Hedera facilitator** verifies and settles each payment on testnet before the resource server issues a short-lived download URL.
+## How it works
+
+1. **Create a stream** — the owner picks an HTS token, HBAR per cadence, cadence length, max slippage, and optionally a max cadence count. The contract pre-funds its HBAR escrow (`createStream` pays in `msg.value`). The output token must have a WHBAR pair on SaucerSwap V1 (e.g. SAUCE on testnet).
+2. **Self-association** — `createStream` calls the HTS precompile `associateToken(address(this), tokenOut)` so the contract can *receive* the swap output (SaucerSwap reverts with `TOKEN_NOT_ASSOCIATED_TO_ACCOUNT` otherwise). Response codes 22 (OK) / 23 (already associated) are both accepted.
+3. **Execute (keeper-often)** — anyone calls `executeById(streamId)` once `nextExecutionAt` is reached. The contract quotes `getAmountsOut` on the live router, applies the stream's slippage tolerance, and calls `swapExactETHForTokens{value: buyAmountTinybar}`. Tokens accumulate on-chain.
+4. **Owner controls** — pause / resume, top-up, withdraw accrued tokens, or close the stream and refund the remaining HBAR escrow.
+
+Prices are never stored or hardcoded: the router is the single source of truth, and the swap cannot be sandwiched beyond the configured per-stream slippage tolerance (1–500 bps).
 
 ## Prerequisites
 
 - [Node.js](https://nodejs.org/) — see [Node.js version](#nodejs-version) below (default: **20 LTS** ≥ 20.18.3)
 - Yarn (default; required if you clone this repo) or npm if you scaffolded with the CLI. For Yarn, install via Corepack: `corepack enable && corepack prepare yarn@stable --activate`
 - [Git](https://git-scm.com/)
-- [Docker](https://docs.docker.com/get-docker/) + Docker Compose (MinIO and self-hosted facilitator)
-- A funded **ECDSA** Hedera testnet account for contract deploy and facilitator fee-payer duties
+- A funded **ECDSA** Hedera testnet account for contract deploy
 
 ## Node.js version
 
-**Use Node 20 LTS (≥ 20.18.3) by default** for everything in this repo: `yarn install`, Hardhat (compile, test, deploy, verify), Docker infra, and the Next.js app. That matches what this template is tested against.
-
-**AWS SDK console notice:** When Next.js compiles the MinIO upload/download routes, you may see a `NodeVersionSupportWarning` on Node 20. The app still works — it is informational. Current `@aws-sdk/client-s3` releases run on Node 20; **future** SDK versions (from early 2027 onward) are expected to require Node 22+. You can ignore the warning for now.
-
-### Optional: Node 22 for the Next.js app only
-
-If you want cleaner dev logs or to stay ahead of AWS SDK’s Node 22 direction, run **Hardhat on Node 20** and **Next.js on Node 22**. Install both with [nvm](https://github.com/nvm-sh/nvm) or [fnm](https://github.com/Schniz/fnm):
-
-1. Run `yarn install` once at the repo root (Node 20 or 22 is fine for install).
-2. **Node 20** — contract work: `yarn hardhat:test`, `yarn hardhat:deploy`, `yarn hardhat:verify:*`.
-3. **Node 22** — resource server: `yarn next:dev`, `yarn next:build`.
+**Use Node 20 LTS (≥ 20.18.3) by default** for everything in this repo: `yarn install`, Hardhat (compile, test, deploy, verify), and the Next.js app. That matches what this template is tested against.
 
 Example with fnm:
 
 ```bash
-fnm use 20 && yarn hardhat:test
-fnm use 22 && yarn next:dev
+fnm use 20 && yarn install && yarn hardhat:test && yarn next:dev
 ```
-
-Hardhat is documented for Node 20; run deploy/tests on Node 22 yourself before switching the whole monorepo to a single version.
 
 ## Quick start
 
@@ -58,116 +59,89 @@ yarn install
 2. Copy environment files:
 
 ```bash
-cp .env.example .env
 cp packages/nextjs/.env.example packages/nextjs/.env
 ```
 
-3. Configure the facilitator fee-payer in root `.env` (see [Why the facilitator needs a private key](#why-the-facilitator-needs-a-private-key)):
-   `FACILITATOR_ACCOUNT_ID` and `FACILITATOR_PRIVATE_KEY`. Fund that account with testnet HBAR from the [Hedera Portal faucet](https://portal.hedera.com/faucet).
+3. Set `NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID` in `packages/nextjs/.env` (WalletConnect / HashPack / AppKit; a working demo id is used as fallback).
 
-4. Set `NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID` in `packages/nextjs/.env` (WalletConnect / HashPack).
-
-5. Deploy `FileRegistry` to Hedera testnet:
+4. Deploy `RecurringBuy` to Hedera testnet:
 
 ```bash
 yarn hardhat:account:generate   # or: yarn hardhat:account:import
 yarn hardhat:deploy --network hederaTestnet
 ```
 
-6. Start local infra and the app:
+5. Run the app:
 
 ```bash
-yarn infra:up        # MinIO :9000 / :9001, facilitator :4020
 yarn next:dev        # http://localhost:3000
 ```
 
-7. Connect **HashPack** in the header, upload a file, set a price, then pay for a private download from the file detail page.
+6. Connect **HashPack**, create a stream (testnet **SAUCE** `0.0.1183558` is pre-filled), fund it, then click **Execute (keeper)** once the cadence elapses.
 
-Step-by-step verification (curl, facilitator health checks, CLI buyer script) is in [`RUNBOOK.md`](RUNBOOK.md).
+Getting testnet HBAR: [Hedera Portal faucet](https://portal.hedera.com/faucet).
 
-## How it works
+## Run the tests
 
-1. **Upload** — the browser gets a presigned MinIO PUT URL from `POST /api/files/upload`, PUTs the bytes to MinIO, then registers metadata on `FileRegistry` via a native Hedera `ContractExecuteTransaction` signed in HashPack (`hedera_signAndExecuteTransaction`).
-2. **List / browse** — the marketplace calls on-chain `getFileCount()` + `getFiles(offset, limit)` (view reads via JSON-RPC). It does **not** scan `FileRegistered` logs — Hedera JSON-RPC limits `eth_getLogs` to a 7-day window.
-3. **Download (public)** — `GET /api/files/:id/download` returns a presigned GET URL with no payment.
-4. **Download (private)** — the same route returns `402 Payment Required`; the x402 client builds a native Hedera `TransferTransaction`, your connected **HashPack** session **partially signs** it (authorizing the HBAR debit), the facilitator **co-signs as fee payer**, submits the transaction to Hedera, and the server responds with a presigned URL plus a `PAYMENT-RESPONSE` receipt.
+`RecurringBuy` ships with hermetic unit tests — a **mock SaucerSwap router**, a **mock ERC-20**, and a **mock HTS precompile** (deployed at `0x167` and stubbed with `hardhat_setCode`). No forking and no funded account needed:
 
-One **HashPack** WalletConnect session (via Reown AppKit, **`hedera` namespace only**) covers both registry writes and x402 payments — no second wallet connection and no separate EVM (`eip155`) signing path.
+```bash
+yarn hardhat:test
+```
 
-## Why the facilitator needs a private key
+The suite covers stream creation, escrow funding and overflow refunds, cadence gating, swap execution + accrual, pausing, owner-only withdrawals, and close-with-refund.
 
-Hedera x402 payments are **native transfers**, not EVM contract calls. HashPack can sign the buyer’s side of that transfer, but it cannot pay Hedera network fees or broadcast the transaction on its own in this flow.
+## Deploy and verify `RecurringBuy`
 
-The self-hosted facilitator holds an **ECDSA fee-payer account** (`FACILITATOR_ACCOUNT_ID` + `FACILITATOR_PRIVATE_KEY`) so it can:
-
-1. **Advertise** which account sponsors fees (`GET /supported` → `extra.feePayer`).
-2. **Verify** the buyer’s partially signed transfer matches the `402` challenge.
-3. **Settle** by adding the fee-payer signature, paying the network fee from its HBAR balance, and submitting the transaction to consensus.
-
-The buyer only authorizes moving their HBAR to the seller’s `payTo` account. The facilitator never custodies buyer funds — it can only co-sign a transfer the buyer already approved.
-
-The Next.js app does **not** need this private key. It only calls `FACILITATOR_URL`. Keep `FACILITATOR_PRIVATE_KEY` in server-side env (root `.env` for Docker, or `facilitator/.env` when running the service standalone), never in the browser.
-
-## Environment variables
-
-| Location | Key variables |
-| --- | --- |
-| Root `.env` | `MINIO_ROOT_*`, `S3_BUCKET`, `FACILITATOR_ACCOUNT_ID`, `FACILITATOR_PRIVATE_KEY` (fee payer — see above), `X402_NETWORK` |
-| `packages/nextjs/.env` | `FACILITATOR_URL`, `X402_NETWORK`, `NEXT_PUBLIC_X402_NETWORK`, `S3_*`, `HEDERA_RPC_URL`, optional `FILE_REGISTRY_ADDRESS`, optional `FILE_REGISTRY_HEDERA_CONTRACT_ID` / `NEXT_PUBLIC_FILE_REGISTRY_HEDERA_CONTRACT_ID` |
-| `facilitator/.env` | Same fee-payer credentials when running the facilitator outside Docker |
-
-Full tables: [`RUNBOOK.md` — Environment variables](RUNBOOK.md#environment-variables).
-
-## Deploy and verify `FileRegistry`
-
-Deployer and facilitator accounts must be **ECDSA** and funded with testnet HBAR.
+Deployer account must be funded with testnet HBAR.
 
 ```bash
 yarn hardhat:deploy --network hederaTestnet
 yarn hardhat:verify:testnet
 ```
 
-This regenerates `packages/nextjs/contracts/deployedContracts.ts` with:
-
-- **`address`** — EVM address (`0x…`) used for JSON-RPC reads and HashScan links
-- **`hederaContractId`** — native Hedera contract id (`0.0.x`) resolved from the mirror node after deploy; required for HashPack native contract executes
+The deploy script reads the **SaucerSwap V1 router and WHBAR addresses** (testnet `0.0.19264` / `0.0.15058`, mainnet `0.0.3045981` / `0.0.1456986`) from `packages/hardhat/utils/saucerSwap.ts` and passes them to the constructor. `deployedContracts.ts` is regenerated with the deployed EVM address + native `hederaContractId` for HashPack.
 
 Verified contracts appear on [Hashscan (testnet)](https://hashscan.io/testnet).
+
+## Environment variables
+
+| Location | Key variables |
+| --- | --- |
+| `packages/nextjs/.env` | `NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID`, `NEXT_PUBLIC_HEDERA_MAINNET_RPC_URL`, `NEXT_PUBLIC_HEDERA_TESTNET_RPC_URL`, `HEDERA_RPC_URL` |
+| `packages/hardhat/.env` | `HEDERA_RPC_URL`, `DEPLOYER_PRIVATE_KEY_ENCRYPTED` (set via `yarn hardhat:account:generate` / `import`) |
+
+No server infrastructure is required — there is no facilitator, no MinIO, no Docker image to run.
 
 ## Useful commands
 
 | Command | Purpose |
 | --- | --- |
-| `yarn infra:up` / `yarn infra:down` | Start or stop MinIO + facilitator |
-| `yarn infra:logs` | Follow Docker container logs |
-| `yarn hardhat:test` | Run `FileRegistry` contract tests |
-| `yarn x402:buy` | Node agent buyer script (see `RUNBOOK.md`) |
-| `yarn facilitator:check-types` | Type-check the facilitator service |
+| `yarn hardhat:test` | Run `RecurringBuy` contract tests (hermetic, no fork) |
+| `yarn hardhat:deploy --network hederaTestnet` | Deploy `RecurringBuy` |
+| `yarn hardhat:verify:testnet` | Sourcify verify + HashScan link |
+| `yarn hardhat:runner` | Execute due streams as a keeper (permissionless) |
+| `yarn hardhat:chain` / `yarn hardhat:fork` | Local Hedera testnet / mainnet fork with live system contracts |
+| `yarn next:dev` | Run the dashboard |
 
 ## Caveats
 
-- **HashPack only** — the demo uses Reown AppKit with HashPack on the native **`hedera`** WalletConnect namespace. MetaMask and the dev burner wallet are not supported in this template.
-- **Native Hedera signing** — registry writes and x402 payments both go through HashPack’s native Hedera APIs (`hedera_signAndExecuteTransaction` / `hedera_signTransaction`), not wagmi `eth_sendTransaction`.
-- **ECDSA accounts** — buyers and the facilitator fee payer must use ECDSA keys (not ED25519).
-- **HBAR balance** — buyers need testnet HBAR for each private download; the facilitator account needs HBAR to sponsor network fees.
-- **Testnet settlement** — MinIO and the facilitator run locally, but payments settle on Hedera **testnet** (or mainnet if you change `X402_NETWORK`). The local Hedera fork is not used for x402.
-- **Hedera JSON-RPC log limits** — `eth_getLogs` is capped to a 7-day range on Hedera; the marketplace lists files via `getFiles` instead of event scanning.
-- **Node.js** — default **20 LTS** (≥ 20.18.3); optional **22** for Next.js only to avoid AWS SDK warnings — see [Node.js version](#nodejs-version).
-- **Docker** — required for `yarn infra:up`.
-- **No on-chain privacy** — payment amounts and accounts are visible on HashScan.
-- **Package churn** — pin `@x402/hedera` / `@x402/core` versions; APIs may change between releases.
-- **External facilitator** — optional: point `FACILITATOR_URL` at a hosted service instead of the local Docker facilitator.
+- **HashPack only** — the demo uses Reown AppKit with HashPack on the native **`hedera`** WalletConnect namespace. MetaMask and the dev burner wallet are not relevant.
+- **Output tokens** — `tokenOut` must have a WHBAR/`tokenOut` pair on SaucerSwap V1. SAUCE on testnet is pre-filled; other tokens return a zero/`INSUFFICIENT_OUTPUT_AMOUNT` quote until a pair is created.
+- **Cadence floor** — the contract enforces `MIN_CADENCE_SECONDS = 60` so a stream cannot grind the network with sub-minute swaps.
+- **Keeper incentive** — execution is permissionless but does not pay the keeper; the design goal is a reliable public schedule, not MEV. Consider running your own keeper through a cron job or an HCS-gated runner if you build on top.
+- **Testnet settlement** — swaps execute on Hedera **testnet** by default (mainnet if you deploy there and configure `hederaMainnet`).
+- **No on-chain privacy** — stream amounts and accounts are visible on HashScan.
+- **Node.js** — default **20 LTS** (≥ 20.18.3).
 
 ## Project layout
 
-- **`packages/hardhat`** — `FileRegistry` contract, deploy scripts, tests
-- **`packages/nextjs`** — Next.js resource server (`/api/files/*`), marketplace UI, x402 client (HashPack)
-- **`facilitator/`** — self-hosted x402 Hedera facilitator (verify / settle)
-- **`docker-compose.yml`** — MinIO + facilitator for local development
+- **`packages/hardhat`** — `RecurringBuy` contract, mock contracts for tests, deploy script, SaucerSwap V1 address utils
+- **`packages/nextjs`** — Next.js dashboard (create/manage streams, keeper execute, HashScan links)
 
 ## Links
 
-- [x402](https://x402.org/)
+- [SaucerSwap V1 docs — Swap HBAR for tokens](https://docs.saucerswap.finance/developers/v1/swap/swap-hbar-for-tokens)
 - [Hedera Documentation](https://docs.hedera.com/)
 - [Hashscan](https://hashscan.io/) — block explorer
 - [Hedera Portal faucet](https://portal.hedera.com/faucet)

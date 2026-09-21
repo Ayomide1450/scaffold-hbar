@@ -23,8 +23,8 @@ import generateTsAbis from "./scripts/generateTsAbis";
 const hederaRpcUrl = process.env.HEDERA_RPC_URL || "https://testnet.hashio.io/api";
 
 // Forking the live Hedera network is opt-in (yarn hardhat:chain / yarn hardhat:fork set HEDERA_FORKING=true).
-// The FileRegistry contract is pure EVM and does not touch HTS/HSS precompiles, so unit tests and local
-// compiles run hermetically without forking. Enable forking only when you need live Hedera system contracts.
+// Unit tests use a mock SaucerSwap router + a mock HTS precompile, so they run hermetically without forking.
+// Enable forking only when you need live Hedera system contracts.
 const enableForking = process.env.HEDERA_FORKING === "true";
 
 // Deployer key: run `yarn account:generate` or `yarn account:import`, or set __RUNTIME_DEPLOYER_PRIVATE_KEY at runtime.
@@ -73,9 +73,9 @@ const config: HardhatUserConfig = {
       chainId: 295,
     },
   },
-  // Hedera is now supported on the main Sourcify instance (sourcify.dev).
-  // No custom verifier URL required — standard tooling works out of the box.
-  // See: https://hedera.com/blog/smart-contract-verification-sourcify-dev-now-supported
+  // Hardhat-verify's native Sourcify driver targets the legacy v1 API (turned off July 2026).
+  // Verification on Hedera now goes through scripts/verifyDeployed.ts, which calls the Sourcify
+  // v2 API directly. These blocks keep hardhat-verify from erroring on load.
   sourcify: {
     enabled: true,
   },
@@ -94,19 +94,6 @@ const config: HardhatUserConfig = {
 task("deploy").setAction(async (args, hre, runSuper) => {
   await runSuper(args);
   await generateTsAbis(hre);
-});
-
-// Extend the verify task to show HashScan link after Sourcify verification.
-task("verify").setAction(async (args, hre, runSuper) => {
-  await runSuper(args);
-
-  const address = args.address;
-  const chainId = hre.network.config.chainId;
-
-  if (address && (chainId === 295 || chainId === 296)) {
-    const network = chainId === 295 ? "mainnet" : "testnet";
-    console.log(`\nHashScan: https://hashscan.io/${network}/contract/${address}`);
-  }
 });
 
 export default config;

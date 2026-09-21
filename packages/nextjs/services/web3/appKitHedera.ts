@@ -11,7 +11,7 @@ const projectId = scaffoldConfig.walletConnectProjectId;
 
 const metadata = {
   name: "Scaffold-HBAR",
-  description: "x402 pay-per-use file marketplace on Hedera",
+  description: "SaucerSwap recurring-buy (DCA) scheduler on Hedera",
   url: typeof window !== "undefined" ? window.location.origin : "http://localhost:3000",
   icons: [typeof window !== "undefined" ? `${window.location.origin}/logo.svg` : "http://localhost:3000/logo.svg"],
 };

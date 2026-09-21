@@ -26,3 +26,9 @@ node_modules
 
 # cli
 dist
+
+# hedera-harness runtime (never ship generated runs/cache)
+.harness/runs/
+.harness/cache/
+.harness/runtime/
+.skill-cache/

@@ -1,218 +1,76 @@
-# x402 Pay-Per-Use Agent Guide
+# SaucerSwap Recurring-Buy Agent Guide
 
-Guidance for coding agents working in the **x402 pay-per-use** Scaffold-HBAR template.
+Guidance for coding agents working in the **SaucerSwap recurring-buy (DCA)** Scaffold-HBAR template.
 
-## Overview
+## What this template does
 
-Sellers upload files to private **MinIO** storage and register access terms on-chain with `FileRegistry`. Buyers pay native **HBAR** (tinybars) via HashPack; a self-hosted **x402 Hedera facilitator** verifies and settles each payment on testnet before the resource server issues a short-lived presigned download URL.
+A `RecurringBuy` contract on Hedera runs dollar-cost-averaging: owners pre-fund a stream in native **HBAR**, and any **keeper** can call `executeById` after each cadence to swap a fixed HBAR amount into an HTS token through the **SaucerSwap V1 DEX**. Purchases accumulate on the contract; the owner withdraws them (`withdraw`) or closes the stream and refunds escrow (`closeStream`).
 
-## Solidity Framework
+The SaucerSwap router is the **single source of truth for pricing** — nothing is stored or hardcoded. Removing the DEX integration makes the template unable to buy.
 
-**Hardhat-only** monorepo (no Foundry package):
+## Repo layout
 
-- **`packages/hardhat`** — `FileRegistry.sol`, deploy scripts, tests
-- **`packages/nextjs`** — Next.js resource server (`/api/files/*`), marketplace UI, x402 client (HashPack)
-- **`facilitator/`** — self-hosted x402 Hedera facilitator (verify / settle)
-- **`docker-compose.yml`** — MinIO + facilitator for local dev
+- **`packages/hardhat`** — `RecurringBuy.sol`, deploy scripts, tests, SaucerSwap address utils
+- **`packages/nextjs`** — Next.js dashboard (create/manage streams, keeper execute, HashScan links)
 
-Payments settle on Hedera **testnet** via native HBAR transfers. MinIO and the facilitator run locally. Do **not** forbid Docker for this template.
+## Hedera services in play
 
-## Architecture
+- **HSCS** — smart contract state (streams, escrow, cadences).
+- **HTS** — the contract **self-associates** with the output token in `createStream` via the HTS precompile:
+  - `associateToken(address(this), tokenOut)` at `HTS_PRECOMPILE_ADDRESS = 0x…0167`
+  - accepted response codes: `HAPI_OK = 22` and `HAPI_ALREADY_ASSOCIATED = 23`
+- **SaucerSwap V1** — `getAmountsOut` quote + `swapExactETHForTokens{value: buyAmountTinybar}` with `path = [whbar, tokenOut]`, `to = address(this)`, `deadline`.
 
-### x402 flow
+## Key facts
 
-1. Upload → presigned MinIO PUT + native `FileRegistry.registerFile` via HashPack (`ContractExecuteTransaction`)
-2. Marketplace listing → on-chain `getFileCount` + `getFiles` (not `eth_getLogs` — Hedera RPC 7-day log window)
-3. Public download → `200` + short-lived presigned GET URL
-4. Private download → `402` → HashPack partial sign (`TransferTransaction`) → facilitator `/settle` → `200` + presigned URL
+- **Naming** — the SaucerSwap V1 router keeps Uniswap's `swapExactETHForTokens` name (HBAR is the "ETH"). There is **no** `swapExactHbarForTokens`.
+- **WHBAR in path** — `path[0]` must be the **WHBAR token id** (0.0.15058 testnet / 0.0.1456986 mainnet), not the WHBAR wrapper contract.
+- **Association** — the swap recipient (`address(this)`) must be associated with the output token or SaucerSwap reverts `TOKEN_NOT_ASSOCIATED_TO_ACCOUNT`. `createStream` handles this.
+- **Units** — HBAR amounts are **tinybar-scale in the contract EVM**: 1 HBAR = 1e8 tinybars, and `msg.value`/balances/`buyAmountTinybar`/swap `value` are all observed at that scale. The JSON-RPC tx `value` field is EVM wei (1e18 per HBAR) — the relay divides it by **1e10** before execution. So for a payment of X HBAR: tx `value` = X × 1e18 wei, contract sees msg.value = X × 1e8 tinybar, and `buyAmountTinybar` passed to `createStream` must be X × 1e8. Verified on testnet (`InsufficientFunds` decoded with msg.value=2e8 for a 2-HBAR tx; the successful stream funded 2e8 tinybar escrow with a 2e18-wei tx value).
+- **Slippage** — per-stream `maxSlippageBps` (1–500), applied to the live `getAmountsOut` quote as `amountOutMin`.
+- **Cadence floor** — `MIN_CADENCE_SECONDS = 60`.
+- **Do not forbid Docker** — this template needs none; there is no local infra.
 
-```text
-Buyer → GET /api/files/:id/download
-          ├─ public / free → presigned URL
-          └─ private → 402 PAYMENT-REQUIRED
-                → client signs HBAR transfer (HashPack)
-                → retry with PAYMENT-SIGNATURE
-                → resource server verify + settle via facilitator
-                → PAYMENT-RESPONSE + short-lived download URL
-```
+## Contract API
 
-### Critical invariants
+| Function | Caller | Purpose |
+| --- | --- | --- |
+| `createStream(tokenOut, buyAmountTinybar, cadenceSeconds, maxSlippageBps, maxCadences)` | anyone (payable) | open + fund a stream |
+| `executeById(streamId)` | anyone | swap next due cadence |
+| `pauseStream` / `resumeStream` | owner | stop/start keeper execution |
+| `topUpStream` (payable) | owner | add escrow |
+| `withdraw(streamId, tokenOut)` | owner | take accrued tokens |
+| `closeStream(streamId)` | owner | refund remaining escrow |
+| `getStream(streamId)`, `accruedOf`, `streamCount`, `router`, `whbar` | anyone | reads |
 
-- The Next.js app **never** holds `FACILITATOR_PRIVATE_KEY`.
-- Prices and x402 amounts are **tinybars** (1 HBAR = 1e8); asset id is `PAYMENT_ASSET` / `HBAR_ASSET` = `"0.0.0"`.
-- `payToAccountId` is a Hedera account id string (e.g. `0.0.1234`), not an EVM address.
-- Private downloads require a fresh payment every time (no allow-list / season pass).
-- Delisted files behave as not found for downloads and marketplace listing.
-- Bytes stay in a **private** bucket; on-chain stores only `objectKey` + `contentHash`.
+## Tests
 
-### HashPack / wallet integration
+Hermetic unit tests in `packages/hardhat/test/RecurringBuy.test.ts` use mocks — no forking:
 
-- Reown AppKit uses **only** the `hedera` namespace (`HederaAdapter` in `appKitHedera.ts`) — no `eip155` wagmi signing path for this template’s upload/payment flows.
-- Registry writes: `writeContractViaNativeProvider` → `hedera_signAndExecuteTransaction`
-- x402 payments: `createHederaProviderSigner` → `hedera_signTransaction` (partial sign; facilitator co-signs as fee payer)
-- Deploy stores both `address` (EVM `0x…`) and `hederaContractId` (`0.0.x`) in `deployedContracts.ts`. Native contract executes must use the Hedera id — `ContractId.fromSolidityAddress` is wrong for JSON-RPC-deployed contracts.
+- `MockSaucerSwapRouter` — 5% fee AMM double; mints the output token to the swap recipient.
+- `MockERC20` — SAUCE stand-in.
+- `MockHederaTokenService` — its bytecode is stubbed at `0x167` via `hardhat_setCode` so `associateToken` returns 22.
 
-### Frontend hooks (this template)
+Run: `yarn hardhat:test`.
 
-- `useRegistryFileListing` — marketplace file list via `getFiles` pagination
-- `writeContractViaNativeProvider` — upload / owner actions (not `useScaffoldWriteContract`)
-- `useScaffoldReadContract` — NOT ~~useScaffoldContractRead~~
-- `useScaffoldWriteContract` — available from scaffold-hbar but **not used** by the x402 marketplace UI
-- `useScaffoldEventHistory` — avoid on Hedera testnet/mainnet (7-day `eth_getLogs` limit); use `getFiles` or an indexer instead
+## Rules
 
-After `yarn hardhat:deploy`, ABIs and addresses land in `packages/nextjs/contracts/deployedContracts.ts` — do not hand-edit (regenerated on deploy).
+- **Tinybars only** — never floats for HBAR amounts; convert with the 1e8 / 1e18 helpers in the UI or tests.
+- **Never hardcode prices** — any price used for `amountOutMin` must come from the router's `getAmountsOut`, not from a static number.
+- **Constructor args** — deploy passes `[routerEvmAddress, whbarEvmAddress]` from `utils/saucerSwap.ts`; update that file (not the deploy script) when a network changes.
+- **Preserve `hederaContractId`** — the deploy script augments the deployment JSON with the native contract id, required for HashPack contract executes. Don't strip it.
 
-## Key Paths
+## Local workflow
 
-| Path | Purpose |
-| ---- | ------- |
-| `packages/hardhat/contracts/FileRegistry.sol` | On-chain access terms |
-| `packages/nextjs/app/api/files/upload/route.ts` | Presigned PUT + upload prep |
-| `packages/nextjs/app/api/files/[id]/download/route.ts` | Public/private download + x402 gate |
-| `packages/nextjs/app/api/files/[id]/route.ts` | File metadata API |
-| `packages/nextjs/app/api/files/route.ts` | Listing API |
-| `packages/nextjs/services/x402/server.ts` | `x402ResourceServer` + `ExactHederaScheme` |
-| `packages/nextjs/services/x402/client.ts` | Browser x402 client |
-| `packages/nextjs/services/x402/walletSigner.ts` | HashPack partial-sign signer |
-| `packages/nextjs/services/storage/client.ts` | MinIO/S3 presigned URLs |
-| `packages/nextjs/services/registry/server.ts` | Server-side `FileRegistry` reads |
-| `packages/nextjs/services/web3/hederaContractWrite.ts` | Native contract writes |
-| `packages/nextjs/utils/scaffold-hbar/hederaContractId.ts` | Hedera contract id resolution |
-| `packages/nextjs/hooks/scaffold-hbar/useRegistryFileListing.ts` | Marketplace listing hook |
-| `packages/nextjs/utils/x402.ts` | Tinybar helpers |
-| `packages/nextjs/app/files/` | Marketplace UI |
-| `facilitator/` | Self-hosted verify/settle service |
-| `docker-compose.yml` | `minio`, `minio-init`, `facilitator` |
+- `yarn hardhat:chain` — Hedera testnet fork (live system contracts); `yarn hardhat:fork` — mainnet fork.
+- `yarn hardhat:test` — hermetic tests (no fork).
+- `yarn hardhat:deploy --network hederaTestnet` — deploy + regenerate `deployedContracts.ts`.
+- `yarn next:dev` — dashboard.
 
-## FileRegistry
+## References
 
-On-chain source of truth for marketplace terms. Access control for downloads is **off-chain**: the resource server reads these fields and decides free vs 402.
+- SaucerSwap V1 swap docs: https://docs.saucerswap.finance/developers/v1/swap/swap-hbar-for-tokens
+- SaucerSwap periphery (ABI source): https://github.com/saucerswaplabs/saucerswap-periphery
+- Mirror node (address verification): https://testnet.mirrornode.hedera.com
 
-```solidity
-string public constant PAYMENT_ASSET = "0.0.0"; // native HBAR; prices in tinybars
-
-struct FileItem {
-    address owner;
-    string payToAccountId;   // e.g. "0.0.1234"
-    uint256 priceTinybar;
-    bool isPublic;
-    string objectKey;        // private bucket key — not file bytes
-    bytes32 contentHash;     // SHA-256
-    string name;
-    string mimeType;
-    bool exists;
-}
-
-function registerFile(
-    string calldata objectKey,
-    string calldata payToAccountId,
-    uint256 priceTinybar,
-    bool isPublic,
-    bytes32 contentHash,
-    string calldata name,
-    string calldata mimeType
-) external returns (bytes32 fileId);
-```
-
-Owner updates: `setPrice`, `setVisibility`, `setPayTo`, `delistFile`. Enumeration: `getFileCount` + `getFiles` (max page `MAX_PAGE_SIZE` = 50).
-
-### Registry checklist
-
-- [ ] Upload bytes to the **private** bucket first; store only `objectKey` + `contentHash` on-chain
-- [ ] `payToAccountId` is a Hedera account id, not an EVM address
-- [ ] Private downloads require a fresh payment every time
-- [ ] Delisted files behave as not found
-
-## MinIO / S3 presigned URLs
-
-Bucket is private (`minio-init` sets anonymous access to none). Nothing is served directly from MinIO.
-
-- Upload: short-lived presigned PUT (`UPLOAD_URL_TTL_SECONDS` = 300)
-- Download: short-lived presigned GET (`DOWNLOAD_URL_TTL_SECONDS` = 60) minted only after public access or successful settle
-- Path-style URLs required for MinIO (`S3_FORCE_PATH_STYLE=true`)
-- Default bucket: `x402-files`
-
-## Addresses & Config
-
-### Docker Compose services
-
-| Service | Role | Ports |
-| ------- | ---- | ----- |
-| `minio` | Private S3-compatible storage | `9000` (API), `9001` (console) |
-| `minio-init` | Creates private bucket | one-shot |
-| `facilitator` | x402 verify/settle (`./facilitator`) | `4020` |
-
-### Root `.env` (see `.env.example`)
-
-| Var | Purpose |
-| --- | ------- |
-| `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` | MinIO credentials |
-| `S3_BUCKET` | Bucket name (must match Next.js) |
-| `FACILITATOR_PORT` | Default `4020` |
-| `X402_NETWORK` | `hedera:testnet` |
-| `FACILITATOR_ACCOUNT_ID` / `FACILITATOR_PRIVATE_KEY` | Funded ECDSA fee-payer (facilitator only) |
-| `HEDERA_NODE_URL` | Optional custom consensus endpoint |
-
-### `packages/nextjs/.env` (see `.env.example`)
-
-| Var | Purpose |
-| --- | ------- |
-| `NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID` | HashPack / Reown |
-| `FACILITATOR_URL` | Default `http://localhost:4020` |
-| `X402_NETWORK` / `NEXT_PUBLIC_X402_NETWORK` | Must match (`hedera:testnet`) |
-| `HEDERA_RPC_URL` | FileRegistry reads |
-| `S3_ENDPOINT` / `S3_BUCKET` / `S3_*` | MinIO client (must match root `.env`) |
-| `FILE_REGISTRY_ADDRESS` | Optional override; normally from `deployedContracts.ts` |
-
-### Tinybar / asset rules
-
-```ts
-export const HBAR_ASSET = "0.0.0";
-export const TINYBAR_PER_HBAR = 100_000_000n;
-```
-
-Never use floats for HBAR amounts. Convert in the UI with helpers in `packages/nextjs/utils/x402.ts`.
-
-## Commands
-
-```bash
-# Local infra (MinIO + facilitator) — Docker required
-yarn infra:up
-yarn infra:down
-yarn infra:logs
-
-# Contracts (Hardhat)
-yarn hardhat:account:generate
-yarn hardhat:deploy --network hederaTestnet
-yarn hardhat:verify:testnet
-yarn hardhat:test
-
-# App
-yarn next:dev
-yarn next:build
-
-# x402 agent buyer (Node script)
-yarn x402:buy
-
-# Quality
-yarn lint
-yarn format
-```
-
-### Suggested bring-up order
-
-1. `yarn install`
-2. Root `.env` — facilitator ECDSA credentials (funded)
-3. `packages/nextjs/.env` — WalletConnect project id + MinIO/x402 vars
-4. `yarn hardhat:deploy --network hederaTestnet` — `FileRegistry`
-5. `yarn infra:up` — MinIO + facilitator; confirm `/health`
-6. `yarn next:dev` — upload / pay / download
-7. Optional: `yarn x402:buy` — CLI buyer
-
-## Skill Reference
-
-Use skill: **`x402-payments`** for HTTP 402 / facilitator patterns, tinybar rules, `x402ResourceServer` / `ExactHederaScheme` wiring, client retry loops, and operational checklists.
-
-## Packaging
-
-Template manifest: `template.json` (branch `templates/x402-pay-per-use`). See RUNBOOK.md § Iteration 5.
+Use skill: **`saucerswap-v1`** patterns via the above docs when wiring DEX calls; keep the fallback `getAmountsOut` → `amountOutMin` slippage path.

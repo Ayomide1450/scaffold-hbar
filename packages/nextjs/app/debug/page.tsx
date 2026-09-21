@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 
-/** Debug contracts UI is disabled in the x402 pay-per-use template. */
+/** Debug contracts UI is disabled in the SaucerSwap recurring-buy template. */
 export default function DebugPage() {
   notFound();
 }

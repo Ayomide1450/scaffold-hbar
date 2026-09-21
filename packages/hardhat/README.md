@@ -52,25 +52,26 @@ You need a deployer account with HBAR on the target network. Without funds, depl
    ```
    You will be prompted to enter the password to decrypt your deployer key.
 
-4. **Verify on Hashscan** (reads `deployments/<network>/` and submits to Sourcify):
+4. **Verify on Hashscan** (reads `deployments/<network>/` and submits to Sourcify **v2** directly):
    ```bash
-   yarn hardhat:verify:testnet   # FileRegistry on chain 296
-   yarn hardhat:verify:mainnet   # FileRegistry on chain 295
+   yarn hardhat:verify:testnet   # RecurringBuy on chain 296
+   yarn hardhat:verify:mainnet   # RecurringBuy on chain 295
    ```
-   Requires a prior deploy on that network so `deployments/<network>/FileRegistry.json` exists.
+   Requires a prior deploy on that network so `deployments/<network>/RecurringBuy.json` exists.
    Stale deployment JSON from other templates is skipped automatically.
 
-   To verify a single address manually:
-   ```bash
-   yarn workspace @sh/hardhat verify --network hederaTestnet 0xYourFileRegistryAddress
-   ```
+   The background here: Sourcify's legacy v1 API (used by `@nomicfoundation/hardhat-verify`) was
+   shut down in July 2026, so this template calls the Sourcify **v2** API directly
+   (`POST /server/v2/verify/metadata/{chainId}/{address}`) with the compiled metadata from the
+   deployment artifact and polls the job until it completes.
 
 ## Layout
 
-- `contracts/` — Solidity sources
-- `deploy/` — hardhat-deploy scripts (e.g. `00_deploy_file_registry.ts`)
+- `contracts/` — Solidity sources (`RecurringBuy.sol`, `mocks/` for tests)
+- `deploy/` — hardhat-deploy scripts (e.g. `00_deploy_recurring_buy.ts`)
 - `scripts/` — generateAccount, importAccount, verifyDeployed, etc.
 - `test/` — contract tests
+- `utils/` — SaucerSwap V1 deployment addresses & Hedera id helpers
 - `hardhat.config.ts` — networks (`hardhat`, `localhost` for RPC at 127.0.0.1:8545, `hederaTestnet`, `hederaMainnet`)
 
 Network and RPC URLs are in `hardhat.config.ts`. Deployer key is read from `.env` (encrypted) and decrypted at deploy time for live networks.

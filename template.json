@@ -1,6 +1,6 @@
 {
-  "name": "x402-pay-per-use",
-  "description": "Pay-per-download file marketplace on Hedera using x402. Private MinIO storage, self-hosted facilitator, FileRegistry on testnet.",
+  "name": "saucerswap-recurring-buy",
+  "description": "Recurring buy / DCA scheduler on Hedera that swaps HBAR into HTS tokens through the SaucerSwap V1 DEX on a fixed cadence. Permissionless keepers execute due swaps; HTS precompile self-association; Next.js dashboard.",
   "create-scaffold-hbar": {
     "capabilities": {
       "frontend": ["nextjs-app"],
@@ -17,7 +17,7 @@
         {
           "steps": [
             {
-              "text": "x402 pay-per-download marketplace: MinIO + self-hosted facilitator + FileRegistry on Hedera testnet."
+              "text": "SaucerSwap recurring-buy (DCA) template: a RecurringBuy contract on Hedera that swaps fixed HBAR amounts into an HTS token on a cadence, with a Next.js dashboard."
             }
           ]
         },
@@ -26,29 +26,18 @@
           "steps": [
             {
               "label": "Copy environment files",
-              "command": "cp .env.example .env"
-            },
-            {
               "command": "cp packages/nextjs/.env.example packages/nextjs/.env"
-            },
-            {
-              "label": "Configure facilitator fee-payer (ECDSA) in root .env",
-              "text": "Set FACILITATOR_ACCOUNT_ID and FACILITATOR_PRIVATE_KEY"
             },
             {
               "label": "Fund accounts with testnet HBAR",
               "url": "https://portal.hedera.com/faucet"
             },
             {
-              "label": "Start local infra (MinIO + facilitator)",
-              "command": "{run:infra:up}"
-            },
-            {
               "label": "Generate a deployer account",
               "command": "{run:hardhat:account:generate}"
             },
             {
-              "label": "Deploy FileRegistry",
+              "label": "Deploy RecurringBuy",
               "command": "{run:hardhat:deploy} --network hederaTestnet"
             },
             {
@@ -56,11 +45,15 @@
               "command": "{run:hardhat:verify:testnet}"
             },
             {
+              "label": "Run the contract tests (mock SaucerSwap router + mock HTS precompile, no fork needed)",
+              "command": "{run:hardhat:test}"
+            },
+            {
               "label": "Start the app",
               "command": "{run:next:dev}"
             },
             {
-              "text": "See README.md and RUNBOOK.md for end-to-end verification and agent testing with {run:x402:buy}."
+              "text": "See README.md and RUNBOOK.md for end-to-end verification, keeper/runner usage, and how the HTS+HSCS services combine."
             }
           ]
         }
