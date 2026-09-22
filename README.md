@@ -104,6 +104,19 @@ The deploy script reads the **SaucerSwap V1 router and WHBAR addresses** (testne
 
 Verified contracts appear on [Hashscan (testnet)](https://hashscan.io/testnet).
 
+## Real testnet evidence
+
+Everything below was executed on **Hedera testnet** and verified via the mirror node and `eth_call` — not simulated:
+
+| Step | Transaction / reference | Result |
+| --- | --- | --- |
+| Deploy `RecurringBuy` → `0.0.10653896` (EVM `0x065FD5E0e1E20E3Bd523aFba3994073edfc95911`) | [0.0.7314364-1790024742-764317928](https://hashscan.io/testnet/tx/0.0.7314364-1790024742-764317928) | SUCCESS — constructor wired to SaucerSwap V1 router `0.0.19264` and WHBAR `0.0.15058` |
+| `createStream` (SAUCE `0.0.1183558`) with 2 HBAR escrow | [0.0.7314364-1790025888-870973987](https://hashscan.io/testnet/tx/0.0.7314364-1790025888-870973987) | SUCCESS — `buyAmountTinybar = 1e8` (1 HBAR), cadence 60 s, slippage 300 bps, max cadences 2 |
+| `executeById` stream #1 (keeper swap) | [0.0.7314364-1790025984-802398695](https://hashscan.io/testnet/tx/0.0.7314364-1790025984-802398695) | SUCCESS — logs show WHBAR deposit → SaucerSwap pair `Sync`/`Swap` → SAUCE to the contract → `CadenceExecuted` |
+| Contract on [Hashscan](https://hashscan.io/testnet/contract/0.0.10653896) | balance 1 HBAR escrow + 54,960,360 SAUCE accrued | Live `eth_call`: `streamCount() = 1`, stream #1 has `executedCadences = 1`, `fundedTinybar = 1e8` (2 HBAR funded, 1 swapped) |
+
+A reverted `createStream` is also on-chain and documented honestly: [0.0.7314364-1790025720-015814006](https://hashscan.io/testnet/tx/0.0.7314364-1790025720-015814006) passed `buyAmountTinybar = 1e18` (a wei-scale mistake) instead of `1e8` tinybars. It reverted with `InsufficientFunds` and is a useful caution: the contract EVM runs in **tinybar** (1e8 per HBAR) while the JSON-RPC tx `value` field runs in **wei** (1e18 per HBAR, divided by 1e10 by the relay).
+
 ## Environment variables
 
 | Location | Key variables |
