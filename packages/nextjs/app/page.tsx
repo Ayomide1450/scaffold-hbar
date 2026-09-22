@@ -128,7 +128,7 @@ function CreateStreamForm({ onCreated, disabled }: { onCreated: () => void; disa
         ],
         value,
       });
-      notification.success("Stream created. Fund the next cadence to start swapping.");
+      notification.success("Stream created. Escrow funded — a keeper can execute once the first cadence elapses.");
       onCreated();
     } catch (err) {
       notification.error(err instanceof Error ? err.message : "Failed to create stream");
