@@ -106,6 +106,17 @@ const deployedContracts = {
               type: "uint256",
             },
           ],
+          name: "StreamCompleted",
+          type: "error",
+        },
+        {
+          inputs: [
+            {
+              internalType: "uint256",
+              name: "streamId",
+              type: "uint256",
+            },
+          ],
           name: "StreamIsPaused",
           type: "error",
         },

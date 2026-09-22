@@ -134,6 +134,7 @@ contract RecurringBuy {
     error NotStreamOwner(uint256 streamId, address caller);
     error StreamIsPaused(uint256 streamId);
     error StreamNotDue(uint256 streamId, uint256 nextExecutionAt);
+    error StreamCompleted(uint256 streamId);
     error InsufficientFunds(uint256 streamId, uint256 fundedTinybar, uint256 buyAmountTinybar);
     error SwapFailed(bytes reason);
     error TokenAssociationFailed(address tokenOut, int64 responseCode);
@@ -253,6 +254,7 @@ contract RecurringBuy {
     function executeById(uint256 _streamId) external returns (uint256 amountOut) {
         Stream storage s = _loadStream(_streamId);
         if (s.isPaused) revert StreamIsPaused(_streamId);
+        if (s.maxCadences > 0 && s.executedCadences >= s.maxCadences) revert StreamCompleted(_streamId);
         if (block.timestamp < s.nextExecutionAt) revert StreamNotDue(_streamId, s.nextExecutionAt);
         if (s.fundedTinybar < s.buyAmountTinybar) revert InsufficientFunds(_streamId, s.fundedTinybar, s.buyAmountTinybar);
 
@@ -281,10 +283,6 @@ contract RecurringBuy {
         s.executedCadences += 1;
         s.lastExecutionAt = block.timestamp;
         s.nextExecutionAt = block.timestamp + s.cadenceSeconds;
-
-        if (s.maxCadences > 0 && s.executedCadences >= s.maxCadences) {
-            s.fundedTinybar = 0;
-        }
 
         _accrued[_streamId][s.tokenOut] += amountOut;
 

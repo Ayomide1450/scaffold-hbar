@@ -95,6 +95,34 @@ describe("RecurringBuy", () => {
     expect(await recurringBuy.accruedOf(1n, await sauce.getAddress())).to.equal(95000000n);
   });
 
+  it("stops at max cadences but refunds the remaining escrow incl. top-ups", async () => {
+    await (
+      await recurringBuy.createStream(await sauce.getAddress(), ONE_HBAR, 60n, 100n, 1n, { value: ONE_HBAR })
+    ).wait();
+
+    // Owner tops up extra escrow after some cadences are already due.
+    await (await recurringBuy.topUpStream(1n, { value: ONE_HBAR * 2n })).wait();
+
+    await ethers.provider.send("evm_increaseTime", [60]);
+    await ethers.provider.send("evm_mine", []);
+    await (await recurringBuy.executeById(1n)).wait();
+
+    // Max cadences reached: the stream must not keep executing…
+    await expect(recurringBuy.executeById(1n))
+      .to.be.revertedWithCustomError(recurringBuy, "StreamCompleted")
+      .withArgs(1n);
+
+    // …and closing must refund every unswapped tinybar (2 of the 3 HBAR escrowed).
+    expect((await recurringBuy.getStream(1n)).fundedTinybar).to.equal(ONE_HBAR * 2n);
+    const before = await ethers.provider.getBalance(owner);
+    const closeTx = await recurringBuy.closeStream(1n);
+    const receipt = await closeTx.wait();
+    const after = await ethers.provider.getBalance(owner);
+    expect((await recurringBuy.getStream(1n)).fundedTinybar).to.equal(0n);
+    const netCost = before - after;
+    expect(netCost - (receipt?.gasUsed ?? 0n) * (receipt?.gasPrice ?? 0n)).to.be.lessThan(1_000_000n);
+  });
+
   it("pauses and blocks execution", async () => {
     await (
       await recurringBuy.createStream(await sauce.getAddress(), ONE_HBAR, 60n, 100n, 1n, { value: ONE_HBAR })
